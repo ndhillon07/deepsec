@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import type { FileRecord, Finding, RefusalReport } from "@deepsec/core";
+import { extractJsonArray, STRICT_JSON_OUTPUT_INSTRUCTION } from "../prompt-utils.js";
 import type { InvestigateResult, RevalidateVerdict } from "./types.js";
 
 // --- Retry / backoff -------------------------------------------------------
@@ -272,8 +273,7 @@ If you analyzed everything normally, return \`{"refused": false, "skipped": []}\
 export function parseRefusalReport(raw: string): RefusalReport | undefined {
   if (!raw) return undefined;
 
-  const jsonMatch = raw.match(/```json\s*([\s\S]*?)```/);
-  const jsonStr = jsonMatch ? jsonMatch[1].trim() : raw.trim();
+  const jsonStr = extractJsonArray(raw);
   try {
     const parsed = JSON.parse(jsonStr) as {
       refused?: boolean;
@@ -358,7 +358,7 @@ For each file:
 
 ## Output Format
 
-**CRITICAL: Return ONLY the JSON array. No explanatory text before or after. No markdown code fences. No commentary. Just the raw JSON array starting with [ and ending with ].**
+${STRICT_JSON_OUTPUT_INSTRUCTION}
 
 If you need to think through your analysis, do so silently during investigation. Your final response must be ONLY the JSON:
 
@@ -401,8 +401,7 @@ export function parseInvestigateResults(
   resultText: string,
   batch: FileRecord[],
 ): InvestigateResult[] {
-  const jsonMatch = resultText.match(/```json\s*([\s\S]*?)```/);
-  const jsonStr = jsonMatch ? jsonMatch[1].trim() : resultText.trim();
+  const jsonStr = extractJsonArray(resultText);
 
   let parsed: unknown;
   try {
@@ -537,7 +536,7 @@ If severity should change, set \`adjustedSeverity\`. Omit if correct.
 
 ## Output Format
 
-**CRITICAL: Return ONLY the JSON array. No explanatory text before or after. No markdown code fences. No commentary. Just the raw JSON array starting with [ and ending with ].**
+${STRICT_JSON_OUTPUT_INSTRUCTION}
 
 If you need to think through your analysis, do so silently. Your final response must be ONLY:
 
@@ -567,18 +566,7 @@ DO NOT include ANY text before the opening [ or after the closing ].`;
 }
 
 export function parseRevalidateVerdicts(resultText: string): RevalidateVerdict[] {
-  // Try to extract from markdown code fence first
-  const jsonMatch = resultText.match(/```json\s*([\s\S]*?)```/);
-  let jsonStr = jsonMatch ? jsonMatch[1].trim() : resultText.trim();
-
-  // If no code fence, try to find JSON array boundaries
-  if (!jsonMatch) {
-    const arrayStart = jsonStr.indexOf('[');
-    const arrayEnd = jsonStr.lastIndexOf(']');
-    if (arrayStart !== -1 && arrayEnd !== -1 && arrayEnd > arrayStart) {
-      jsonStr = jsonStr.substring(arrayStart, arrayEnd + 1);
-    }
-  }
+  const jsonStr = extractJsonArray(resultText);
 
   let parsed: unknown;
   try {
