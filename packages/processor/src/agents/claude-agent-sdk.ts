@@ -1,5 +1,6 @@
 import { query, type SandboxSettings } from "@anthropic-ai/claude-agent-sdk";
 import type { RefusalReport } from "@deepsec/core";
+import { filterEnvByPrefix, logEnvVars } from "../env-utils.js";
 import {
   backoff,
   buildInvestigatePrompt,
@@ -101,33 +102,28 @@ function buildSandbox(): SandboxSettings | undefined {
 
 /**
  * Build the minimal env passed to the Claude Code child process.
- * Allowlist + the credential routing the SDK was about to read off
- * `process.env` itself. Anything else (CI tokens, cloud creds, custom
- * vars) is dropped.
+ * Allowlist + all ANTHROPIC_* and CLAUDE_* vars for agent configuration.
+ * Anything else (CI tokens, cloud creds, custom vars) is dropped.
  */
 function buildClaudeEnv(): Record<string, string> {
   const env: Record<string, string> = {};
+
+  // Add allowlisted vars
   for (const [k, v] of Object.entries(process.env)) {
     if (typeof v !== "string") continue;
     if (CLAUDE_ENV_ALLOWLIST.has(k) || k.startsWith("LC_")) {
       env[k] = v;
     }
   }
-  // Forward only the credential routing pair the SDK needs to auth.
-  // ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL is the gateway pair;
-  // ANTHROPIC_API_KEY covers direct-Anthropic. CLAUDE_CODE_OAUTH_TOKEN
-  // is the subscription-mode token. Forwarding only these (rather
-  // than wholesale process.env) means the agent's Bash sees just
-  // these specific values — no GITHUB_TOKEN, AWS_*, etc.
-  for (const k of [
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "ANTHROPIC_BASE_URL",
-    "CLAUDE_CODE_OAUTH_TOKEN",
-  ]) {
-    const v = process.env[k];
-    if (typeof v === "string") env[k] = v;
-  }
+
+  // Forward ALL ANTHROPIC_* and CLAUDE_* env vars to the agent.
+  // This allows passing custom headers, base URLs, timeouts, debug flags, etc.
+  const { env: agentEnv, keys } = filterEnvByPrefix(["ANTHROPIC_", "CLAUDE_"]);
+  Object.assign(env, agentEnv);
+
+  // Log forwarded env vars (with redaction for secrets)
+  logEnvVars(keys, env);
+
   return env;
 }
 

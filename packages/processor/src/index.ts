@@ -30,6 +30,7 @@ import { batchCandidates } from "./batch.js";
 import { enrichFileRecord } from "./enrich.js";
 import { assemblePrompt } from "./prompt/assemble.js";
 import { languagesForBatch } from "./prompt/file-language.js";
+import { shouldRetry, createRetryConfig } from "./retry-helper.js";
 
 export { ClaudeAgentSdkPlugin } from "./agents/claude-agent-sdk.js";
 export { CodexAgentSdkPlugin } from "./agents/codex-sdk.js";
@@ -682,6 +683,128 @@ export async function process(params: {
         totalBatches: batches.length,
       });
     } catch (err) {
+      // Retry once if JSON parsing failed (common with overly verbose LLM responses)
+      if (shouldRetry(err, { config, quotaAborted: quotaAbort.signal.aborted, errorPattern: "parseable JSON findings array" })) {
+        emitProgress({
+          type: "batch_complete",
+          message: `Batch ${i + 1}/${batches.length} JSON parse failed, retrying with stricter prompt... (${batchesInFlight} in flight)`,
+          batchIndex: i,
+          totalBatches: batches.length,
+        });
+
+        try {
+          // Retry with additional emphasis on JSON-only output
+          const retryConfig = createRetryConfig(config);
+
+          const projectInfoForAgent = customPromptTemplate === undefined ? "" : projectInfo;
+          const gen = agent.investigate({
+            batch,
+            projectRoot: effectiveRootPath,
+            promptTemplate: buildBatchPrompt(batch),
+            projectInfo: projectInfoForAgent,
+            config: retryConfig,
+            signal: quotaAbort.signal,
+          });
+
+          let result = await gen.next();
+          while (!result.done) {
+            emitProgress({
+              type: "agent_progress",
+              message: (result.value as AgentProgress).message,
+              batchIndex: i,
+              totalBatches: batches.length,
+              agentProgress: result.value as AgentProgress,
+            });
+            result = await gen.next();
+          }
+
+          const output = result.value as InvestigateOutput;
+          const { results, meta: batchMeta } = output;
+
+          // Process successful retry results (same logic as successful first attempt)
+          totalCostUsd += batchMeta.costUsd ?? 0;
+          totalInputTokens += batchMeta.usage?.inputTokens ?? 0;
+          totalOutputTokens += batchMeta.usage?.outputTokens ?? 0;
+          totalDurationMs += batchMeta.durationMs;
+
+          const validResultCount = results.reduce(
+            (n, r) => n + (batch.some((b) => b.filePath === r.filePath) ? 1 : 0),
+            0,
+          );
+          const splitN = Math.max(1, validResultCount);
+          const perFileCost = batchMeta.costUsd != null ? batchMeta.costUsd / splitN : undefined;
+          const perFileUsage = batchMeta.usage
+            ? {
+                inputTokens: batchMeta.usage.inputTokens / splitN,
+                outputTokens: batchMeta.usage.outputTokens / splitN,
+                cacheReadInputTokens: batchMeta.usage.cacheReadInputTokens / splitN,
+                cacheCreationInputTokens: batchMeta.usage.cacheCreationInputTokens / splitN,
+              }
+            : undefined;
+          const perFileDurationMs = batchMeta.durationMs / splitN;
+          const perFileDurationApiMs =
+            batchMeta.durationApiMs != null ? batchMeta.durationApiMs / splitN : undefined;
+          const perFileNumTurns = batchMeta.numTurns != null ? batchMeta.numTurns / splitN : undefined;
+
+          for (const res of results) {
+            const record = batch.find((r) => r.filePath === res.filePath);
+            if (!record) continue;
+
+            const sig = (slug: string | undefined, title: string | undefined) =>
+              `${slug ?? ""}::${(title ?? "").trim().toLowerCase()}`;
+            const existing = new Set((record.findings ?? []).map((f) => sig(f.vulnSlug, f.title)));
+            const newFindings = res.findings
+              .filter((f) => !existing.has(sig(f.vulnSlug, f.title)))
+              .map((f) => ({ ...f, producedByRunId: runId }));
+            record.findings = [...(record.findings ?? []), ...newFindings];
+            const findingsForHistoryCount = newFindings.length;
+
+            record.analysisHistory.push({
+              runId,
+              investigatedAt: new Date().toISOString(),
+              durationMs: perFileDurationMs,
+              durationApiMs: perFileDurationApiMs,
+              agentType,
+              model,
+              modelConfig: { model },
+              agentSessionId: batchMeta.agentSessionId ?? "unknown",
+              findingCount: findingsForHistoryCount,
+              numTurns: perFileNumTurns,
+              phase: "process",
+              costUsd: perFileCost,
+              usage: perFileUsage,
+              reinvestigateMarker: reinvestigate,
+            });
+
+            record.status = "processed";
+            record.lockedByRunId = undefined;
+            record.lockedAt = undefined;
+
+            try {
+              enrichFileRecord(record);
+            } catch (e) {
+              console.error(
+                `[deepsec] enrich failed for ${record.filePath}: ${e instanceof Error ? e.message : e}`,
+              );
+            }
+            writeFileRecord(record);
+          }
+
+          batchesInFlight--;
+          batchesCompleted++;
+          emitProgress({
+            type: "batch_complete",
+            message: `Batch ${i + 1}/${batches.length} succeeded on retry: ${results.length} analyses, ${results.reduce((s, r) => s + r.findings.length, 0)} findings (${batchesInFlight} in flight, ${batchesCompleted}/${batches.length} done)`,
+            batchIndex: i,
+            totalBatches: batches.length,
+          });
+          return; // Success on retry, exit catch block
+        } catch (retryErr) {
+          // Retry failed, fall through to original error handling
+          err = retryErr;
+        }
+      }
+
       batchesInFlight--;
       batchesCompleted++;
       batchesFailed++;
@@ -1064,6 +1187,88 @@ export async function revalidate(params: {
         totalBatches: batches.length,
       });
     } catch (err) {
+      // Retry once if JSON parsing failed (common with overly verbose LLM responses)
+      if (shouldRetry(err, { config, quotaAborted: quotaAbort.signal.aborted, errorPattern: "parseable JSON" })) {
+        emitProgress({
+          type: "batch_complete",
+          message: `Batch ${idx + 1}/${batches.length} JSON parse failed, retrying with stricter prompt... (${batchesInFlight} in flight)`,
+          batchIndex: idx,
+          totalBatches: batches.length,
+        });
+
+        try {
+          // Retry with additional emphasis on JSON-only output
+          const retryConfig = createRetryConfig(config);
+
+          const gen = agent.revalidate({
+            batch,
+            projectRoot: effectiveRootPath,
+            projectInfo,
+            config: retryConfig,
+            force,
+            signal: quotaAbort.signal,
+          });
+
+          let result = await gen.next();
+          while (!result.done) {
+            emitProgress({
+              type: "agent_progress",
+              message: (result.value as AgentProgress).message,
+              batchIndex: idx,
+              totalBatches: batches.length,
+              agentProgress: result.value as AgentProgress,
+            });
+            result = await gen.next();
+          }
+
+          const output = result.value as RevalidateOutput;
+          const batchMeta = output.meta;
+          totalCostUsd += batchMeta.costUsd ?? 0;
+
+          // Apply verdicts (same logic as successful first attempt)
+          for (const verdict of output.verdicts) {
+            const file = batch.find((f) => f.filePath === verdict.filePath);
+            if (!file) continue;
+            const finding = file.findings.find((f) => f.title === verdict.title);
+            if (!finding) continue;
+            finding.revalidation = {
+              verdict: verdict.verdict,
+              reasoning: verdict.reasoning,
+              adjustedSeverity: verdict.adjustedSeverity,
+              revalidatedAt: new Date().toISOString(),
+              runId,
+              model,
+            };
+            if (verdict.adjustedSeverity) {
+              finding.severity = verdict.adjustedSeverity;
+            }
+            totalRevalidated++;
+            if (verdict.verdict === "true-positive") totalTP++;
+            else if (verdict.verdict === "false-positive") totalFP++;
+            else if (verdict.verdict === "fixed") totalFixed++;
+            else totalUncertain++;
+          }
+
+          // Write file records
+          for (const file of batch) {
+            writeFileRecord(file);
+          }
+
+          batchesInFlight--;
+          batchesCompleted++;
+          emitProgress({
+            type: "batch_complete",
+            message: `Batch ${idx + 1}/${batches.length} succeeded on retry: ${output.verdicts.length} verdicts (${batchesInFlight} in flight, ${batchesCompleted}/${batches.length} done)`,
+            batchIndex: idx,
+            totalBatches: batches.length,
+          });
+          return; // Success on retry, exit catch block
+        } catch (retryErr) {
+          // Retry failed, fall through to original error handling
+          err = retryErr;
+        }
+      }
+
       batchesInFlight--;
       batchesCompleted++;
       if (err instanceof QuotaExhaustedError && !quotaExhausted) {

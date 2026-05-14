@@ -358,9 +358,10 @@ For each file:
 
 ## Output Format
 
-After your investigation, output a JSON block with your findings for EACH file. Use this exact format:
+**CRITICAL: Return ONLY the JSON array. No explanatory text before or after. No markdown code fences. No commentary. Just the raw JSON array starting with [ and ending with ].**
 
-\`\`\`json
+If you need to think through your analysis, do so silently during investigation. Your final response must be ONLY the JSON:
+
 [
   {
     "filePath": "relative/path/to/file.ts",
@@ -377,7 +378,6 @@ After your investigation, output a JSON block with your findings for EACH file. 
     ]
   }
 ]
-\`\`\`
 
 **Severity levels:**
 - **CRITICAL / HIGH / MEDIUM** — security vulnerabilities (exploitable by an attacker)
@@ -386,7 +386,15 @@ After your investigation, output a JSON block with your findings for EACH file. 
 
 **vulnSlug** can be any of the known categories OR a custom slug for issues not covered by the scanner. Use \`"other"\` as the slug prefix for novel findings (e.g., \`"other-race-condition"\`, \`"other-logic-bug"\`, \`"other-info-disclosure"\`).
 
-If a file has no real vulnerabilities after thorough investigation, include it with an empty findings array.`;
+If a file has no real vulnerabilities after thorough investigation, include it with an empty findings array.
+
+**Example of CORRECT output:**
+[{"filePath":"api/users.ts","findings":[{"severity":"HIGH","vulnSlug":"sql-injection","title":"SQL injection in getUserById",...}]}]
+
+**Example of INCORRECT output:**
+After thorough investigation, here are my findings: [{"filePath":"api/users.ts",...}]
+
+DO NOT include ANY text before the opening [ or after the closing ]. All your analysis and reasoning goes in the "description" fields within the JSON.`;
 }
 
 export function parseInvestigateResults(
@@ -529,7 +537,10 @@ If severity should change, set \`adjustedSeverity\`. Omit if correct.
 
 ## Output Format
 
-\`\`\`json
+**CRITICAL: Return ONLY the JSON array. No explanatory text before or after. No markdown code fences. No commentary. Just the raw JSON array starting with [ and ending with ].**
+
+If you need to think through your analysis, do so silently. Your final response must be ONLY:
+
 [
   {
     "filePath": "exact/path/to/file.ts",
@@ -539,18 +550,36 @@ If severity should change, set \`adjustedSeverity\`. Omit if correct.
     "reasoning": "Detailed explanation (5-10 sentences). Show your work."
   }
 ]
-\`\`\`
 
 **Include \`filePath\` for every verdict** so we can match verdicts to the correct file. \`adjustedSeverity\` is optional.
 
-**Your reasoning is the most important part.** A verdict without thorough reasoning is worthless.`;
+**Your reasoning is the most important part.** A verdict without thorough reasoning is worthless. Put all your analysis and thinking into the \`reasoning\` field - do NOT add explanatory text outside the JSON.
+
+**Example of CORRECT output:**
+[{"filePath":"api/users.ts","title":"SQL injection in getUserById","verdict":"true-positive","reasoning":"Confirmed SQL injection..."}]
+
+**Example of INCORRECT output:**
+After reviewing the code, I found the following: [{"filePath":"api/users.ts",...}]
+
+DO NOT include ANY text before the opening [ or after the closing ].`;
 
   return { prompt, totalFindings };
 }
 
 export function parseRevalidateVerdicts(resultText: string): RevalidateVerdict[] {
+  // Try to extract from markdown code fence first
   const jsonMatch = resultText.match(/```json\s*([\s\S]*?)```/);
-  const jsonStr = jsonMatch ? jsonMatch[1].trim() : resultText.trim();
+  let jsonStr = jsonMatch ? jsonMatch[1].trim() : resultText.trim();
+
+  // If no code fence, try to find JSON array boundaries
+  if (!jsonMatch) {
+    const arrayStart = jsonStr.indexOf('[');
+    const arrayEnd = jsonStr.lastIndexOf(']');
+    if (arrayStart !== -1 && arrayEnd !== -1 && arrayEnd > arrayStart) {
+      jsonStr = jsonStr.substring(arrayStart, arrayEnd + 1);
+    }
+  }
+
   let parsed: unknown;
   try {
     parsed = JSON.parse(jsonStr);
