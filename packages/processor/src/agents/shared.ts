@@ -538,8 +538,15 @@ If severity should change, set \`adjustedSeverity\`. Omit if correct.
 
 ${STRICT_JSON_OUTPUT_INSTRUCTION}
 
-If you need to think through your analysis, do so silently. Your final response must be ONLY:
+**CRITICAL INSTRUCTION: Your ENTIRE response must be ONLY the JSON array. Do NOT write ANY text outside the JSON.**
 
+❌ WRONG - Do NOT do this:
+"Now I have all the information I need. Let me analyze each finding: [...]"
+
+❌ WRONG - Do NOT do this:
+"After reviewing the code, I found: [...]"
+
+✅ CORRECT - Your response must START with the opening bracket:
 [
   {
     "filePath": "exact/path/to/file.ts",
@@ -552,15 +559,10 @@ If you need to think through your analysis, do so silently. Your final response 
 
 **Include \`filePath\` for every verdict** so we can match verdicts to the correct file. \`adjustedSeverity\` is optional.
 
-**Your reasoning is the most important part.** A verdict without thorough reasoning is worthless. Put all your analysis and thinking into the \`reasoning\` field - do NOT add explanatory text outside the JSON.
+**Put ALL analysis in the \`reasoning\` field.** Do NOT write explanatory text before or after the JSON array.
 
-**Example of CORRECT output:**
-[{"filePath":"api/users.ts","title":"SQL injection in getUserById","verdict":"true-positive","reasoning":"Confirmed SQL injection..."}]
-
-**Example of INCORRECT output:**
-After reviewing the code, I found the following: [{"filePath":"api/users.ts",...}]
-
-DO NOT include ANY text before the opening [ or after the closing ].`;
+**The very first character of your response must be the opening bracket [**
+**The very last character of your response must be the closing bracket ]**`;
 
   return { prompt, totalFindings };
 }
