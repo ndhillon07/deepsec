@@ -2,7 +2,7 @@
 
 This document tracks all modifications made to the upstream deepsec codebase (forked from https://github.com/vercel/deepsec).
 
-**Note:** This file only documents changes to upstream source code. Custom scripts in `scripts/` and documentation in `custom_docs/` are not listed here.
+**Note:** This file only documents changes to upstream source code. Custom scripts in `harness/` and documentation in `custom_docs/` are not listed here.
 
 ---
 
@@ -419,6 +419,119 @@ pnpm build
 
 ---
 
+## 3. Custom Per-Model Token Pricing
+
+### Problem
+Default costs come from API-reported values (Claude) or hardcoded rates (Codex/GPT). When routing through a custom LLM gateway (e.g., AMD LLM Gateway), pricing may differ from standard Anthropic/OpenAI rates.
+
+### Solution
+Added a pricing module that allows custom per-model token pricing via environment variables.
+
+---
+
+### 3.1 Pricing Module (NEW)
+
+**File:** `packages/processor/src/agents/pricing.ts` (NEW FILE)
+
+**Purpose:** Centralized pricing configuration with per-model support.
+
+**Environment Variables:**
+```bash
+# Per-model pricing (recommended)
+DEEPSEC_PRICING_OPUS_INPUT=15.0      # $/1M tokens
+DEEPSEC_PRICING_OPUS_CACHED=1.5
+DEEPSEC_PRICING_OPUS_OUTPUT=75.0
+DEEPSEC_PRICING_SONNET_INPUT=3.0
+DEEPSEC_PRICING_SONNET_OUTPUT=15.0
+DEEPSEC_PRICING_HAIKU_INPUT=0.25
+DEEPSEC_PRICING_HAIKU_OUTPUT=1.25
+
+# Fallback (applies to all models without specific config)
+DEEPSEC_PRICING_INPUT=3.0
+DEEPSEC_PRICING_CACHED=0.3
+DEEPSEC_PRICING_OUTPUT=15.0
+```
+
+**Key Functions:**
+```typescript
+export function getCustomPricing(model?: string): PricingRates | null;
+export function maybeOverrideCost(apiCost: number | undefined, usage?: TokenUsage, model?: string): number | undefined;
+```
+
+**Model Detection:** Maps model names to pricing tiers:
+- Opus tier: `claude-opus-*`, `gpt-5.5`, `gpt-5.4-pro`
+- Sonnet tier: `claude-sonnet-*`, `gpt-5.4`
+- Haiku tier: `claude-haiku-*`, `gpt-5.4-mini`, `gpt-5.4-nano`
+
+---
+
+### 3.2 Updated Claude Agent SDK
+
+**File:** `packages/processor/src/agents/claude-agent-sdk.ts`
+
+**Changes:**
+```diff
++import { maybeOverrideCost } from "./pricing.js";
+
+// In investigate() result handling:
+ sdkMeta = {
+   ...
+-  costUsd: msg.total_cost_usd,
++  costUsd: maybeOverrideCost(msg.total_cost_usd, usage, model),
+   ...
+ };
+
+// Same change in revalidate()
+```
+
+**Why:** When custom pricing env vars are set, cost is recalculated from token usage instead of using API-reported cost.
+
+---
+
+### 3.3 Updated Codex SDK
+
+**File:** `packages/processor/src/agents/codex-sdk.ts`
+
+**Changes:**
+```diff
++import { getCustomPricing, type PricingRates } from "./pricing.js";
+
+ function estimateCostUsd(model: string, usage: CodexUsage): number | undefined {
+-  const rates = MODEL_PRICING_USD_PER_M_TOKENS[model];
++  const customRates = getCustomPricing(model);
++  const rates: PricingRates | undefined = customRates ?? MODEL_PRICING_USD_PER_M_TOKENS[model];
+   if (!rates) return undefined;
+   ...
+ }
+```
+
+**Why:** Custom rates override hardcoded GPT pricing when env vars are set.
+
+---
+
+### 3.4 Backward Compatibility
+
+When no `DEEPSEC_PRICING_*` env vars are set:
+- Claude SDK: Uses `msg.total_cost_usd` from API (unchanged)
+- Codex SDK: Uses hardcoded `MODEL_PRICING_USD_PER_M_TOKENS` (unchanged)
+- No log output from pricing module
+
+---
+
+## Summary of All Changes
+
+| File | Type | Description |
+|------|------|-------------|
+| `packages/processor/src/agents/shared.ts` | Modified | Stricter JSON-only prompts; better JSON extraction |
+| `packages/processor/src/retry-helper.ts` | **NEW** | Common retry helper module |
+| `packages/processor/src/env-utils.ts` | **NEW** | Env var utilities with redaction |
+| `packages/processor/src/agents/pricing.ts` | **NEW** | Per-model custom pricing configuration |
+| `packages/processor/src/index.ts` | Modified | Import retry helper; add retry logic |
+| `packages/processor/src/agents/claude-agent-sdk.ts` | Modified | Forward env vars; use custom pricing |
+| `packages/processor/src/agents/codex-sdk.ts` | Modified | Use custom pricing when configured |
+
+---
+
 ## Future Improvements
 
 1. **Structured Output Mode**: Use Claude's native structured output (when available) instead of parsing JSON strings
@@ -426,6 +539,7 @@ pnpm build
 3. **Fallback Parser**: Use regex to extract verdict info even from malformed JSON
 4. **Model-Specific Prompts**: Sonnet needs less hand-holding than Opus - adjust prompt per model
 5. **Metrics Dashboard**: Track retry success rate, JSON parse failure rate over time
+6. **Cost Export**: Export metrics.json alongside findings.json for external dashboards
 
 ---
 

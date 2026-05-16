@@ -1,6 +1,7 @@
 import { query, type SandboxSettings } from "@anthropic-ai/claude-agent-sdk";
 import type { RefusalReport } from "@deepsec/core";
 import { filterEnvByPrefix, logEnvVars } from "../env-utils.js";
+import { maybeOverrideCost } from "./pricing.js";
 import {
   backoff,
   buildInvestigatePrompt,
@@ -305,20 +306,21 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
               case "result":
                 if (msg.subtype === "success") {
                   resultText = msg.result;
+                  const usage = msg.usage
+                    ? {
+                        inputTokens: msg.usage.input_tokens ?? 0,
+                        outputTokens: msg.usage.output_tokens ?? 0,
+                        cacheReadInputTokens: msg.usage.cache_read_input_tokens ?? 0,
+                        cacheCreationInputTokens: msg.usage.cache_creation_input_tokens ?? 0,
+                      }
+                    : undefined;
                   sdkMeta = {
                     durationApiMs: msg.duration_api_ms,
                     numTurns: msg.num_turns,
-                    costUsd: msg.total_cost_usd,
+                    costUsd: maybeOverrideCost(msg.total_cost_usd, usage, model),
                     agentSessionId: msg.session_id,
+                    usage,
                   };
-                  if (msg.usage) {
-                    sdkMeta.usage = {
-                      inputTokens: msg.usage.input_tokens ?? 0,
-                      outputTokens: msg.usage.output_tokens ?? 0,
-                      cacheReadInputTokens: msg.usage.cache_read_input_tokens ?? 0,
-                      cacheCreationInputTokens: msg.usage.cache_creation_input_tokens ?? 0,
-                    };
-                  }
                 } else {
                   lastError = String(msg.error ?? "unknown");
                   yield {
@@ -489,20 +491,21 @@ export class ClaudeAgentSdkPlugin implements AgentPlugin {
             if (msg.type === "result") {
               if (msg.subtype === "success") {
                 resultText = msg.result;
+                const usage = msg.usage
+                  ? {
+                      inputTokens: msg.usage.input_tokens ?? 0,
+                      outputTokens: msg.usage.output_tokens ?? 0,
+                      cacheReadInputTokens: msg.usage.cache_read_input_tokens ?? 0,
+                      cacheCreationInputTokens: msg.usage.cache_creation_input_tokens ?? 0,
+                    }
+                  : undefined;
                 sdkMeta = {
                   durationApiMs: msg.duration_api_ms,
                   numTurns: msg.num_turns,
-                  costUsd: msg.total_cost_usd,
+                  costUsd: maybeOverrideCost(msg.total_cost_usd, usage, model),
                   agentSessionId: msg.session_id,
+                  usage,
                 };
-                if (msg.usage) {
-                  sdkMeta.usage = {
-                    inputTokens: msg.usage.input_tokens ?? 0,
-                    outputTokens: msg.usage.output_tokens ?? 0,
-                    cacheReadInputTokens: msg.usage.cache_read_input_tokens ?? 0,
-                    cacheCreationInputTokens: msg.usage.cache_creation_input_tokens ?? 0,
-                  };
-                }
               } else {
                 lastError = String(msg.error ?? "unknown");
                 yield {

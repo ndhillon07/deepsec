@@ -47,8 +47,8 @@ purchase orders, and billing details. The most attractive attacks:
 
 ## False-positive sources to ignore
 
-- `src/scripts/migrations/**` — one-shot migrations run via
-  `tsx scripts/migrations/<file>.ts`. They legitimately read/write
+- `src/harness/migrations/**` — one-shot migrations run via
+  `tsx harness/migrations/<file>.ts`. They legitimately read/write
   across tenants because they're admin-run.
 - `src/lib/seed/**` — DB seed data, dev-only.
 - Any file under `__tests__/` or matching `*.test.ts` / `*.spec.ts`.

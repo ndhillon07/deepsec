@@ -12,6 +12,7 @@ import {
   type ThreadEvent,
   type ThreadItem,
 } from "@openai/codex-sdk";
+import { getCustomPricing, type PricingRates } from "./pricing.js";
 import {
   backoff,
   buildInvestigatePrompt,
@@ -585,7 +586,8 @@ function chooseFinalText(messages: string[]): string {
 }
 
 function estimateCostUsd(model: string, usage: CodexUsage): number | undefined {
-  const rates = MODEL_PRICING_USD_PER_M_TOKENS[model];
+  const customRates = getCustomPricing(model);
+  const rates: PricingRates | undefined = customRates ?? MODEL_PRICING_USD_PER_M_TOKENS[model];
   if (!rates) return undefined;
   const cached = usage.cached_input_tokens ?? 0;
   const uncachedInput = Math.max(0, (usage.input_tokens ?? 0) - cached);
