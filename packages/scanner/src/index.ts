@@ -328,6 +328,12 @@ const LANGUAGE_EXTENSIONS: Record<string, string[]> = {
   csharp: [".cs"],
   lua: [".lua"],
   terraform: [".tf"],
+  c: [".c", ".h"],
+  cpp: [".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hh", ".hxx", ".h++"],
+  swift: [".swift"],
+  scala: [".scala", ".sc"],
+  shell: [".sh", ".bash", ".zsh"],
+  yaml: [".yml", ".yaml"],
 };
 
 function languageOf(filePath: string): string | null {

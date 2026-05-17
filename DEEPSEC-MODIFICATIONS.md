@@ -530,6 +530,7 @@ When no `DEEPSEC_PRICING_*` env vars are set:
 | `packages/processor/src/agents/claude-agent-sdk.ts` | Modified | Forward env vars; use custom pricing |
 | `packages/processor/src/agents/codex-sdk.ts` | Modified | Use custom pricing when configured |
 | `packages/deepsec/src/commands/export.ts` | Modified | Include analysisHistory in findings.json export |
+| `packages/scanner/src/index.ts` | Modified | Add C/C++, Swift, Scala, Shell, YAML to LANGUAGE_EXTENSIONS |
 
 ---
 
@@ -571,6 +572,50 @@ Modified the export command to include `analysisHistory` from the FileRecord in 
 - Cost breakdown by model (Opus/Sonnet/Haiku)
 - Cost breakdown by phase (process/revalidate/triage)
 - Cache hit rate
+
+---
+
+## 5. Add C/C++ and Additional Languages to Coverage Statistics
+
+### Problem
+The "Coverage by language" output showed TypeScript, Python, Rust, etc. but was missing C/C++ even when C++ matchers were actively firing (cpp-pointer-safety, llvm-compiler-safety, etc. with thousands of matches).
+
+### Solution
+Added C/C++ and other missing languages to the `LANGUAGE_EXTENSIONS` map.
+
+---
+
+### 5.1 Updated Language Extensions
+
+**File:** `packages/scanner/src/index.ts`
+
+**Changes:**
+```diff
+ const LANGUAGE_EXTENSIONS: Record<string, string[]> = {
+   typescript: [".ts", ".tsx", ".cts", ".mts"],
+   javascript: [".js", ".jsx", ".cjs", ".mjs"],
+   python: [".py"],
+   ruby: [".rb"],
+   php: [".php"],
+   go: [".go"],
+   rust: [".rs"],
+   java: [".java"],
+   kotlin: [".kt", ".kts"],
+   csharp: [".cs"],
+   lua: [".lua"],
+   terraform: [".tf"],
++  c: [".c", ".h"],
++  cpp: [".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hh", ".hxx", ".h++"],
++  swift: [".swift"],
++  scala: [".scala", ".sc"],
++  shell: [".sh", ".bash", ".zsh"],
++  yaml: [".yml", ".yaml"],
+ };
+```
+
+**Why:** The scanner's matchers fire on C/C++ files based on their own `filePatterns`, but the language statistics display (`Coverage by language`) uses `LANGUAGE_EXTENSIONS` to count files per language. Without C/C++ entries, these files weren't being counted in the statistics even though matchers were finding issues.
+
+**Upstream candidate:** Yes - this is a straightforward bug fix that benefits all users scanning C/C++ codebases.
 
 ---
 
