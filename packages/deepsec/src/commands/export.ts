@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { FileRecord, Finding, Severity } from "@deepsec/core";
+import type { AnalysisEntry, FileRecord, Finding, Severity } from "@deepsec/core";
 import { dataDir, getDataRoot, loadAllFileRecords } from "@deepsec/core";
 import { BOLD, DIM, GREEN, RESET, YELLOW } from "../formatters.js";
 import { resolveAgentType } from "../resolve-agent-type.js";
@@ -48,6 +48,8 @@ interface ExportedFinding {
     githubUrl?: string;
     owners: OwnerSummary;
   };
+  /** Cost/token tracking per analysis phase */
+  analysisHistory?: AnalysisEntry[];
 }
 
 function summarizeOwners(record: FileRecord): OwnerSummary {
@@ -512,6 +514,8 @@ export async function exportCommand(opts: {
             githubUrl,
             owners,
           },
+          // Include analysisHistory for cost/token tracking
+          analysisHistory: record.analysisHistory ?? [],
         });
         emitted++;
       }

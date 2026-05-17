@@ -529,6 +529,48 @@ When no `DEEPSEC_PRICING_*` env vars are set:
 | `packages/processor/src/index.ts` | Modified | Import retry helper; add retry logic |
 | `packages/processor/src/agents/claude-agent-sdk.ts` | Modified | Forward env vars; use custom pricing |
 | `packages/processor/src/agents/codex-sdk.ts` | Modified | Use custom pricing when configured |
+| `packages/deepsec/src/commands/export.ts` | Modified | Include analysisHistory in findings.json export |
+
+---
+
+## 4. Export analysisHistory for Cost Tracking
+
+### Problem
+The `deepsec export` command generates `findings.json` but doesn't include `analysisHistory`, which contains cost/token metrics (`costUsd`, `usage.inputTokens`, etc.). This prevents the viewer's Costs tab from displaying any data.
+
+### Solution
+Modified the export command to include `analysisHistory` from the FileRecord in each exported finding.
+
+---
+
+### 4.1 Updated Export Command
+
+**File:** `packages/deepsec/src/commands/export.ts`
+
+**Changes:**
+```diff
++import type { AnalysisEntry, FileRecord, Finding, Severity } from "@deepsec/core";
+-import type { FileRecord, Finding, Severity } from "@deepsec/core";
+
+ interface ExportedFinding {
+   // ... existing fields ...
++  /** Cost/token tracking per analysis phase */
++  analysisHistory?: AnalysisEntry[];
+ }
+
+ // In the findings.push() call:
+         findings.push({
+           // ... existing fields ...
++          // Include analysisHistory for cost/token tracking
++          analysisHistory: record.analysisHistory ?? [],
+         });
+```
+
+**Why:** The `analysisHistory` array contains per-phase cost and token data recorded during scan. Including it in the export enables the viewer's Costs tab to display:
+- Total cost and tokens
+- Cost breakdown by model (Opus/Sonnet/Haiku)
+- Cost breakdown by phase (process/revalidate/triage)
+- Cache hit rate
 
 ---
 
