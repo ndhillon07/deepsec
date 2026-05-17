@@ -122,8 +122,8 @@ function buildClaudeEnv(): Record<string, string> {
   const { env: agentEnv, keys } = filterEnvByPrefix(["ANTHROPIC_", "CLAUDE_"]);
   Object.assign(env, agentEnv);
 
-  // Log forwarded env vars (with redaction for secrets)
-  logEnvVars(keys, env);
+  // Forwarded env vars logged only in debug mode to reduce log clutter
+  // logEnvVars(keys, env);
 
   return env;
 }
