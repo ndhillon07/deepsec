@@ -781,7 +781,7 @@ export async function process(params: {
             record.lockedAt = undefined;
 
             try {
-              enrichFileRecord(record);
+              enrichFileRecord(record, effectiveRootPath);
             } catch (e) {
               console.error(
                 `[deepsec] enrich failed for ${record.filePath}: ${e instanceof Error ? e.message : e}`,
